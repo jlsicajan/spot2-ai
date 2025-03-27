@@ -1,0 +1,53 @@
+[flake8]
+min_python_version = 3.8.0
+max-line-length = 100
+max-complexity = 10
+ban-relative-imports = true
+format-greedy = 1
+statistics = True
+show-source = True
+inline-quotes = double
+type-checking-strict = true
+eradicate-whitelist-extend = ^-.*;
+# Provide a comma-separated list of glob patterns to exclude from checks.
+extend-exclude =
+    # git folder
+    .git,
+    # python cache
+    __pycache__,
+    # pytest cache
+    .pytest_cache,
+    # mypy cache
+    .mypy_cache,
+    # serverless cache
+    .serverless,
+    # node_modules
+    node_modules,
+    # py* environments
+    .venv,
+    venv
+# Provide a comma-separate list of glob patterns to include for checks.
+filename =
+    *.py
+# Specify a list of codes to ignore.
+ignore =
+    # Ignore unused imports
+    F401, F841, W503
+    # Ignore function complexity
+    C901
+    # Ignore boolean expression ==
+    E712
+    # Continuation line under-indented or over-indented visual or hanging
+    E121, E122, E126, E128
+# Specify the list of error codes you wish Flake8 to report.
+select =
+    E,
+    W,
+    F,
+    C
+per-file-ignores =
+    # Ignore import after code and long lines in tests
+    tests/*:E402,E501
+    # Ignore long lines in SQL generators, migration and testing
+    migrations/*:E501,W291
+    generator/*:E501

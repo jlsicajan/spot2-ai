@@ -1,0 +1,23 @@
+[project]
+name = "spot2-ai"
+version = "1.0.0"
+description = "Conversational AI Web Application"
+authors = [{name = "Jose Sicajan", email = "jlsicajan@gmail.com"}]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn==0.31.0",
+    "requests==2.32.3",
+    "openai==1.68.2",
+    "python-multipart==0.0.12",
+    "streamlit==1.43.2"
+]
+
+[dependency-groups]
+dev = [
+  "black==24.3.0",
+  "flake8==7.0.0",
+  "pytest==8.1.1"
+]
