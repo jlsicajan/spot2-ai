@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import openai
 import os
 import json
-
+from datetime import datetime
 app = FastAPI()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -15,92 +15,94 @@ openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 REQUIRED_FIELDS = ["budget", "total_size", "real_estate_type", "city"]
 
-
 class UserMessage(BaseModel):
     message: str
-    session_data: Dict[str, Any] = {}
-
+    user_id: Optional[str] = None
 
 class BotResponse(BaseModel):
     response: str
-    session_data: Dict[str, Any]
+    conversation: Dict[str, Any]
+    finished_conversation: bool
 
+def load_history():
+    try:
+        with open("conversation_history.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
-def extract_fields(user_input: str, session_data: Dict[str, Any]) -> Dict[str, Any]:
+def save_history(data):
+    with open("conversation_history.json", "w") as f:
+        json.dump(data, f)
+
+def generate_response(user_input: str, current_fields: Dict[str, Any]) -> Dict[str, Any]:
     prompt = f"""
-    Eres un asistente especializado en bienes raíces comerciales en Mexico.
+        Eres un recolector de informacion, relacionado a bienes raíces comerciales.
+        Solo puedes responder con el fin de recolectar information relacionado a bienes raices, cualquier otra conversacion o tema no esta permitida y esta estricamente prohibida. 
+        Tu objetivo es conversar con el usuario para recopilar la siguiente información requerida:
         
-    Extrae los siguientes datos del mensaje del usuario y responde únicamente con un JSON valido:
-    
-    - budget: presupuesto del usuario (ejemplo: "20000 MXN" o "30 mil pesos", pero puede ser cualquier otra moneda)
-    - total_size: tamaño requerido del espacio (ejemplo: "500 m2", extrae los valores, a veces pueden venir unidos)
-    - real_estate_type: tipo de inmueble (ejemplo: "oficina", "local", "industrial", "terreno")
-    - city: ciudad donde se busca el inmueble (ejemplo: "Ciudad de Mexico")
-    
-    Responde con un JSON valido, Si algun campo no se menciona, devuelve null en ese valor.
-    
-    Mensaje del usuario: "{user_input}"
-    """
-
+        - budget: presupuesto (por ejemplo, "20000 USD")
+        - total_size: tamaño requerido (por ejemplo, "500 m2")
+        - real_estate_type: tipo de inmueble (por ejemplo, "oficina")
+        - city: ciudad (por ejemplo, "Ciudad de México")
+        
+        La conversación actual en formato JSON es:
+        {json.dumps(current_fields)}
+        El usuario acaba de decir: "{user_input}"
+        Responde de forma natural y amigable. Si aún falta algún campo requerido, continúa preguntando de manera conversacional. 
+        Si todos los campos están completos, ofrece un resumen en forma de listado y iconos de check y pregunta si desea agregar información extra solo una vez. 
+        Tu respuesta debe ser un JSON válido con dos llaves:
+        - "conversation_finished": true o false
+        - "reply": el mensaje de respuesta para el usuario.
+        - "updated_fields": un objeto con la información recopilada hasta el momento (incluyendo "extra_info" si existe) y el "user_id".
+        Solo responde en formato JSON
+"""
     try:
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Eres un extractor de datos profesional.",
-                },
-                {
-                    "role": "system",
-                    "content": "Solo puedes responder con el fin de obtener los campos, otra respuesta o conversacion no esta permitida",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=200,
+            messages=[{"role": "system", "content": prompt}],
+            max_tokens=150,
         )
-
         raw = response.choices[0].message.content.strip()
-        parsed = json.loads(raw)
-
-        for field in REQUIRED_FIELDS:
-            if parsed.get(field) is not None:
-                session_data[field] = parsed[field]
-
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Respuesta invalida de OpenAI.")
-    except openai.OpenAIError as e:
-        raise HTTPException(status_code=500, detail=f"Error de OpenAI: {str(e)}")
-
-    return session_data
-
+        return json.loads(raw)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error procesando la respuesta del LLM.")
 
 @app.post("/chat", response_model=BotResponse)
-def chat_with_ai(user_message: UserMessage):
-    session_data = extract_fields(user_message.message, user_message.session_data)
+def chat(user_message: UserMessage):
+    history = load_history()
+    if user_message.user_id:
+        user_id = user_message.user_id
+    else:
+        user_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
 
-    missing_fields = [field for field in REQUIRED_FIELDS if not session_data.get(field)]
+    current_fields = history.get(user_id, {})
+    current_fields["user_id"] = user_id
 
-    field_questions = {
-        "budget": "¿Cual es tu presupuesto aproximado?",
-        "total_size": "¿Que tamaño de espacio necesitas? (por ejemplo, 500 m2)",
-        "real_estate_type": "¿Que tipo de inmueble estás buscando? (oficina, local, industrial, terreno)",
-        "city": "¿En que ciudad estás buscando?",
-    }
+    if all(current_fields.get(field) for field in REQUIRED_FIELDS):
+        summary = "Gracias por la información. Hemos recibido los siguientes datos:\n"
+        for field in REQUIRED_FIELDS:
+            summary += f"- {field}: {current_fields[field]}\n"
+        summary += "En breve te enviaremos las propiedades disponibles."
 
-    if not missing_fields:
-        summary = (
-            f"Gracias por compartir toda la informacion.\n\n"
-            f"Resumen de tu busqueda:\n"
-            f"- Tipo de inmueble: {session_data['real_estate_type']}\n"
-            f"- Ciudad: {session_data['city']}\n"
-            f"- Tamaño: {session_data['total_size']}\n"
-            f"- Presupuesto: {session_data['budget']}\n\n"
-            f"Estoy consultando nuestra base de datos para encontrar los mejores inmuebles comerciales disponibles. En breve te mostrare las opciones mas adecuadas."
-        )
-        return BotResponse(response=summary, session_data=session_data)
+        return BotResponse(response=summary, conversation=current_fields, finished_conversation=True)
 
-    next_field = missing_fields[0]
-    return BotResponse(
-        response=field_questions[next_field],
-        session_data=session_data,
-    )
+    result = generate_response(user_message.message, current_fields)
+    updated_fields = result.get("updated_fields", {})
+    updated_fields["user_id"] = user_id
+
+    if all(updated_fields.get(field) for field in REQUIRED_FIELDS):
+        summary = "Gracias por la información. Hemos recibido los siguientes datos:\n"
+
+        summary += f"- Ciudad: {updated_fields['city']}\n"
+        summary += f"- Presupuesto: {updated_fields['budget']}\n"
+        summary += f"- Tipo de propiedad: {updated_fields['real_estate_type']}\n"
+        summary += f"- Tamano del inmueble: {updated_fields['total_size']}\n"
+
+        summary += "En breve te enviaremos las propiedades disponibles."
+        result["reply"] = summary
+
+    history[user_id] = updated_fields
+    save_history(history)
+
+    return BotResponse(response=result.get("reply", ""), conversation=updated_fields, finished_conversation=False)

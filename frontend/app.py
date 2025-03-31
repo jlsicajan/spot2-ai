@@ -12,17 +12,14 @@ if os.path.exists(logo_path):
 
 st.title("Asistente Spot2")
 
-if "session_data" not in st.session_state:
-    st.session_state.session_data = {}
-
-if "conversation" not in st.session_state:
-    st.session_state.conversation = [
-        {
-            "role": "assistant",
-            "content": "Hola. Soy el asistente de Spot2. ¿Que tipo de inmueble comercial estas buscando?",
-        }
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+if "conversation_data" not in st.session_state:
+    st.session_state.conversation_data = {}
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = [
+        {"role": "assistant", "content": "Hola. Soy el asistente de Spot2. ¿En qué puedo ayudarte para encontrar el inmueble ideal?"}
     ]
-
 st.markdown(
     """
     <style>
@@ -53,61 +50,47 @@ st.markdown(
             justify-content: flex-end;
         }
     </style>
-""",
+    """,
     unsafe_allow_html=True,
 )
-
-for msg in st.session_state.conversation:
+for msg in st.session_state.chat_history:
     if msg["role"] == "user":
-        st.markdown(
-            f"""
-            <div class="chat-row user">
-                <div class="chat-bubble user-bubble">{msg['content']}</div>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"""<div class="chat-row user"><div class="chat-bubble user-bubble">{msg['content']}</div></div>""", unsafe_allow_html=True)
     else:
-        st.markdown(
-            f"""
-            <div class="chat-row">
-                <div class="chat-bubble bot-bubble">{msg['content']}</div>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"""<div class="chat-row"><div class="chat-bubble bot-bubble">{msg['content']}</div></div>""", unsafe_allow_html=True)
+
+conversation_finished = st.session_state.conversation_data.get("conversation_finished", False)
 
 with st.form(key="chat_form", clear_on_submit=True):
     user_input = st.text_input(
         "Tu mensaje",
         placeholder="Escribe tu mensaje y presiona Enter",
         label_visibility="collapsed",
+        disabled=conversation_finished,
+        key="user_input",
     )
-    submit = st.form_submit_button("Enviar")
+    submit = st.form_submit_button("Enviar", disabled=conversation_finished)
 
-if submit and user_input.strip():
-    st.session_state.conversation.append({"role": "user", "content": user_input})
-
-    payload = {"message": user_input, "session_data": st.session_state.session_data}
-
+if submit and st.session_state.get("user_input", "").strip():
+    st.session_state.chat_history.append({"role": "user", "content": st.session_state.user_input})
+    payload = {"message": st.session_state.user_input, "user_id": st.session_state.user_id}
     try:
         response = requests.post(API_URL, json=payload)
         data = response.json()
-        st.session_state.conversation.append(
-            {"role": "assistant", "content": data["response"]}
-        )
-        st.session_state.session_data = data["session_data"]
+        st.session_state.chat_history.append({"role": "assistant", "content": data["response"]})
+        st.session_state.user_id = data["conversation"].get("user_id", st.session_state.user_id)
+        st.session_state.conversation_data = data["conversation"]
         st.rerun()
-
     except Exception as e:
         st.error(f"Error: {e}")
 
-if st.button("Reiniciar conversacion"):
-    st.session_state.conversation = [
-        {
-            "role": "assistant",
-            "content": "Hola. Soy el asistente de Spot2. ¿Que tipo de inmueble comercial estas buscando?",
-        }
+if conversation_finished:
+    st.info("La conversación ha finalizado. Por favor, reinicia la conversación para enviar una nueva solicitud.")
+
+if st.button("Reiniciar conversación"):
+    st.session_state.chat_history = [
+        {"role": "assistant", "content": "Hola. Soy el asistente de Spot2. ¿En qué puedo ayudarte para encontrar el inmueble ideal?"}
     ]
-    st.session_state.session_data = {}
+    st.session_state.user_id = None
+    st.session_state.conversation_data = {}
     st.rerun()
